@@ -252,8 +252,8 @@ final class AiTestSupport {
     /** The real services connected to fake repositories and a scripted Gemini. */
     static final class Fixture {
         final EventRepository eventRepo = eventRepository();
-        final EventServiceImpl eventService = new EventServiceImpl(eventRepo);
         final ScheduleConflictService conflictService = new ScheduleConflictService(eventRepo);
+        final EventServiceImpl eventService = new EventServiceImpl(eventRepo, conflictService);
         final GeminiActionService actionService = new GeminiActionService(eventService, conflictService);
         final ScriptedGeminiClient gemini = new ScriptedGeminiClient();
         final GeminiService geminiService = new GeminiService(gemini, new ObjectMapper());

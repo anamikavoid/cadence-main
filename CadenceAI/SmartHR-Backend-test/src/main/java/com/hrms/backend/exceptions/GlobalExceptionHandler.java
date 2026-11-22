@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(errorResponse);
     }
 
+    @ExceptionHandler(EventConflictException.class)
+    public ResponseEntity<ErrorApiResponseMessage> calendarConflict(EventConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorApiResponseMessage.builder().error(ex.getMessage()).build());
+    }
+
     //handling bad request custom exception
     @ExceptionHandler(BadApiRequestException.class)
     public ResponseEntity<ErrorApiResponseMessage> resourceNotFoundExceptionHandler(BadApiRequestException ex){

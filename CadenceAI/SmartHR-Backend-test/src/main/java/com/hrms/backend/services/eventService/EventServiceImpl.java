@@ -10,6 +10,9 @@ import com.hrms.backend.repositories.EventRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.hrms.backend.services.aiService.ScheduleConflictService;
+import com.hrms.backend.exceptions.EventConflictException;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -27,13 +30,16 @@ public class EventServiceImpl implements EventServiceInterface {
 
     private final EventRepository eventRepository;
 
+    private final ScheduleConflictService conflicts;
+
     @Autowired
-    public EventServiceImpl(EventRepository eventRepository) {
+    public EventServiceImpl(EventRepository eventRepository, ScheduleConflictService conflicts) {
         this.eventRepository = eventRepository;
+        this.conflicts = conflicts;
     }
 
     @Override
-    public Event create(String userId, EventRequestDto dto, String source) {
+    public synchronized Event create(String userId, EventRequestDto dto, String source) {
         requireUser(userId);
         // Abuse protection: one user (or a misbehaving AI loop) cannot fill the database.
         if (eventRepository.countByUserId(userId) >= MAX_EVENTS_PER_USER) {
@@ -44,18 +50,24 @@ public class EventServiceImpl implements EventServiceInterface {
         event.setSource(source == null ? "MANUAL" : source);
         event.setCreatedAt(Instant.now());
         applyDto(event, dto);
+        requireFree(event);
         return eventRepository.save(event);
     }
 
     @Override
-    public Event update(String userId, String eventId, EventRequestDto dto) {
+    public synchronized Event update(String userId, String eventId, EventRequestDto dto) {
         Event event = getById(userId, eventId); // 404 if not this user's event
+        Instant previousStart = event.getStartTime();
+        Instant previousEnd = event.getEndTime();
         applyDto(event, dto);
+        if (!previousStart.equals(event.getStartTime()) || !previousEnd.equals(event.getEndTime())) {
+            requireFree(event);
+        }
         return eventRepository.save(event);
     }
 
     @Override
-    public void delete(String userId, String eventId) {
+    public synchronized void delete(String userId, String eventId) {
         requireUser(userId);
         long deleted = eventRepository.deleteByIdAndUserId(eventId, userId);
         if (deleted == 0) {
@@ -81,6 +93,25 @@ public class EventServiceImpl implements EventServiceInterface {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    @Override
+    public synchronized Event confirmMove(String userId, String id, Instant previousStart, Instant previousEnd, Instant start) {
+        Event event = getById(userId, id);
+        if (!event.getStartTime().equals(previousStart) || !event.getEndTime().equals(previousEnd)) {
+            throw new EventConflictException("The event changed. Request a fresh proposal.");
+        }
+        event.setStartTime(start);
+        event.setEndTime(start.plus(Duration.between(previousStart, previousEnd)));
+        requireFree(event);
+        event.setUpdatedAt(Instant.now());
+        return eventRepository.save(event);
+    }
+
+    private void requireFree(Event event) {
+        if (!conflicts.findConflicts(event.getUserId(), event.getStartTime(), event.getEndTime(), event.getId()).isEmpty()) {
+            throw new EventConflictException("That time overlaps another event.");
+        }
+    }
 
     private void requireUser(String userId) {
         if (userId == null || userId.isBlank()) {

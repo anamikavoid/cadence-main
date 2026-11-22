@@ -142,11 +142,29 @@ class GeminiActionServiceTest {
     }
 
     @Test
-    void confirmingAConflictingCreateSavesIt() {
+    void confirmingAConflictingCreateSavesTheOfferedFreeSlot() {
         addEvent(f, U, "Maths", "2026-11-22", "17:00", "18:00");
         ActionOutcome proposal = handle(action("CREATE_EVENT", "title", "DSA", "date", "2026-11-22", "startTime", "17:30"));
         ActionOutcome done = f.actionService.executePending(U, IST, NOW, proposal.getPending());
         assertEquals(AiStatus.COMPLETED, done.getStatus());
+        assertEquals(proposal.getSuggestions().getFirst().start(), done.getEvents().getFirst().getStartTime());
+        assertTrue(f.conflictService.findConflicts(U, done.getEvents().getFirst().getStartTime(),
+                done.getEvents().getFirst().getEndTime(), done.getLastEventId()).isEmpty());
+        assertEquals(2, countEvents(f, U));
+    }
+
+    @Test
+    void anAlternativeTakenBeforeConfirmationIsRejected() {
+        addEvent(f, U, "Maths", "2026-11-22", "17:00", "18:00");
+        var proposal = handle(action("CREATE_EVENT", "title", "DSA", "date", "2026-11-22", "startTime", "17:30"));
+        var slot = proposal.getSuggestions().getFirst();
+        EventRequestDto taken = new EventRequestDto();
+        taken.setTitle("Another booking");
+        taken.setStartTime(slot.start());
+        taken.setEndTime(slot.end());
+        f.eventService.create(U, taken, "MANUAL");
+
+        assertEquals(AiStatus.INFO, f.actionService.executePending(U, IST, NOW, proposal.getPending()).getStatus());
         assertEquals(2, countEvents(f, U));
     }
 
@@ -286,7 +304,8 @@ class GeminiActionServiceTest {
         assertEquals(AiStatus.NEEDS_CONFIRMATION, o.getStatus());
         assertEquals(ist("2026-11-22", "10:00"), f.eventService.getById(U, maths.getId()).getStartTime(), "unchanged so far");
         f.actionService.executePending(U, IST, NOW, o.getPending());
-        assertEquals(ist("2026-11-22", "14:00"), f.eventService.getById(U, maths.getId()).getStartTime());
+        assertEquals(o.getSuggestions().getFirst().start(), f.eventService.getById(U, maths.getId()).getStartTime());
+        assertNotEquals(ist("2026-11-22", "14:00"), o.getPending().getStartTime());
     }
 
     @Test

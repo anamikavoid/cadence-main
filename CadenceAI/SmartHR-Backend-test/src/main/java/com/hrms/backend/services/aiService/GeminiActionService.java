@@ -117,6 +117,9 @@ public class GeminiActionService {
                         List.of(created), created.getId());
             }
             if (type == AiAction.UPDATE_EVENT) {
+                if (checkStartAllowed(p.getStartTime(), now) != null) {
+                    return ActionOutcome.info("That time has passed. Please choose another slot.");
+                }
                 Event saved = eventService.update(userId, p.getTargetEventId(), dtoFromPending(p));
                 return ActionOutcome.completed(AiAction.UPDATE_EVENT.name(),
                         "Done! " + quote(saved.getTitle()) + " is now on " + describeWhen(saved.getStartTime(), saved.getEndTime(), zone) + ".",
@@ -185,13 +188,9 @@ public class GeminiActionService {
         }
 
         // Conflict: never silently double-book. Ask, and offer alternatives.
-        long minutes = Duration.between(dto.getStartTime(), dto.getEndTime()).toMinutes();
-        List<Slot> alternatives = conflictService.suggestAlternatives(userId, zone, dto.getStartTime(), minutes, null, now, SUGGESTION_COUNT);
-        String summary = "Create " + quote(title) + " on " + describeWhen(dto.getStartTime(), dto.getEndTime(), zone);
-        PendingAiAction pending = newPending(AiAction.CREATE_EVENT, null, dto, summary, now);
-        String reply = "That overlaps with " + describeList(conflicts, zone) + ". Should I create " + quote(title) + " anyway?"
-                + suggestionText(alternatives, zone);
-        return ActionOutcome.needsConfirmation(AiAction.CREATE_EVENT.name(), reply, pending, alternatives);
+        Duration length = Duration.between(dto.getStartTime(), dto.getEndTime());
+        List<Slot> alternatives = conflictService.suggestAlternatives(userId, zone, dto.getStartTime(), length, null, now, SUGGESTION_COUNT);
+        return proposeAlternative(AiAction.CREATE_EVENT, null, dto, title, now, zone, conflicts, alternatives);
     }
 
     // ------------------------------------------------------------ UPDATE
@@ -273,13 +272,21 @@ public class GeminiActionService {
             return ActionOutcome.completed(AiAction.UPDATE_EVENT.name(), reply, List.of(saved), saved.getId());
         }
 
-        long minutes = Duration.between(newStart, newEnd).toMinutes();
-        List<Slot> alternatives = conflictService.suggestAlternatives(userId, zone, newStart, minutes, target.getId(), now, SUGGESTION_COUNT);
-        String summary = "Move " + quote(target.getTitle()) + " to " + describeWhen(newStart, newEnd, zone);
-        PendingAiAction pending = newPending(AiAction.UPDATE_EVENT, target.getId(), dto, summary, now);
-        String reply = "Moving " + quote(target.getTitle()) + " to " + describeWhen(newStart, newEnd, zone) + " overlaps with "
-                + describeList(conflicts, zone) + ". Should I move it anyway?" + suggestionText(alternatives, zone);
-        return ActionOutcome.needsConfirmation(AiAction.UPDATE_EVENT.name(), reply, pending, alternatives);
+        Duration length = Duration.between(newStart, newEnd);
+        List<Slot> alternatives = conflictService.suggestAlternatives(userId, zone, newStart, length, target.getId(), now, SUGGESTION_COUNT);
+        return proposeAlternative(AiAction.UPDATE_EVENT, target.getId(), dto, target.getTitle(), now, zone, conflicts, alternatives);
+    }
+
+    private ActionOutcome proposeAlternative(AiAction action, String id, EventRequestDto dto, String title,
+                                             Instant now, ZoneId zone, List<Event> conflicts, List<Slot> alternatives) {
+        String reply = "That overlaps with " + describeList(conflicts, zone) + ".";
+        if (alternatives.isEmpty()) return ActionOutcome.clarification(reply + " Which other day should I try?");
+        Slot slot = alternatives.getFirst();
+        dto.setStartTime(slot.start());
+        dto.setEndTime(slot.end());
+        String summary = "Schedule " + quote(title) + " on " + describeWhen(slot.start(), slot.end(), zone);
+        return ActionOutcome.needsConfirmation(action.name(), reply + " " + summary + "?",
+                newPending(action, id, dto, summary, now), alternatives);
     }
 
     // ------------------------------------------------------------ CANCEL
