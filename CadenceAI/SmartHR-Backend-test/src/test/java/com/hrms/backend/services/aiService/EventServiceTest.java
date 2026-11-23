@@ -10,6 +10,13 @@ import com.hrms.backend.services.eventService.EventServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.hrms.backend.models.User;
+import com.hrms.backend.controllers.EventController;
+import com.hrms.backend.exceptions.GlobalExceptionHandler;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -103,10 +110,26 @@ class EventServiceTest {
     }
 
     @Test
+    void forceParameterCannotBypassConflictValidation() throws Exception {
+        var existing = addEvent(f, "u1", "Meeting", "2026-11-22", "10:00", "11:00");
+        var user = new User();
+        user.setId("u1");
+        var auth = new UsernamePasswordAuthenticationToken(user, null);
+        var mvc = MockMvcBuilders
+                .standaloneSetup(new EventController(f.eventService))
+                .setControllerAdvice(new GlobalExceptionHandler()).build();
+        String body = "{\"title\":\"Collision\",\"startTime\":\"" + existing.getStartTime() + "\"}";
+        mvc.perform(MockMvcRequestBuilders.post("/events")
+                .param("force", "true").principal(auth).contentType("application/json").content(body))
+                .andExpect(MockMvcResultMatchers.status().isConflict());
+        assertEquals(1, countEvents(f, "u1"));
+    }
+
+    @Test
     void thereIsAPerUserEventLimit() {
         Instant start = ist("2026-11-22", "10:00");
         for (int i = 0; i < EventServiceImpl.MAX_EVENTS_PER_USER; i++) {
-            f.eventService.create("u1", dto("e" + i, start.plus(Duration.ofMinutes(i)), null), "MANUAL");
+            f.eventService.create("u1", dto("e" + i, start.plus(Duration.ofHours(i)), null), "MANUAL");
         }
         assertThrows(BadApiRequestException.class, () -> f.eventService.create("u1", dto("one too many", start, null), "AI"));
         f.eventService.create("u2", dto("other users are not affected", start, null), "AI"); // must not throw

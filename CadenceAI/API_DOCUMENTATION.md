@@ -72,10 +72,10 @@ Real example of a conflict (alice already has "DSA Assignment" 5:00–6:00 PM):
 ```json
 {
   "status": "NEEDS_CONFIRMATION",
-  "reply": "That overlaps with \"DSA Assignment\" (5:00 PM – 6:00 PM). Should I create \"Maths class\" anyway?\nFree times that would work: Sun, Nov 22 4:00 PM – 5:00 PM, Sun, Nov 22 6:00 PM – 7:00 PM, Sun, Nov 22 7:00 PM – 8:00 PM.",
+  "reply": "That overlaps with \"DSA Assignment\" (5:00 PM – 6:00 PM). Schedule \"Maths class\" on Sun, Nov 22, 4:00 PM – 5:00 PM?",
   "action": "CREATE_EVENT",
   "events": [],
-  "pendingAction": { "id": "4f0c…", "type": "CREATE_EVENT", "summary": "Create \"Maths class\" on Sun, Nov 22, 5:30 PM – 6:30 PM" },
+  "pendingAction": { "id": "4f0c…", "type": "CREATE_EVENT", "summary": "Schedule \"Maths class\" on Sun, Nov 22, 4:00 PM – 5:00 PM" },
   "suggestions": [ { "start": "…", "end": "…", "label": "Sun, Nov 22 4:00 PM – 5:00 PM" }, … ]
 }
 ```
@@ -107,6 +107,22 @@ Deletes the caller's conversation. `204 No Content`. Events are not affected.
 
 ---
 
+## Scheduling proposals
+
+`POST /scheduling/proposals` takes a bearer token and an availability window with ISO-8601 instants. The entire window is available except for the caller's existing events. Example request body:
+
+```json
+{
+  "availability": {"start":"2026-11-25T09:00:00Z","end":"2026-11-25T13:00:00Z"},
+  "activities": [{"title":"Prepare report","minutes":60,"priority":"HIGH","deadline":"2026-11-25T10:30:00Z"}],
+  "flexibleEventIds": []
+}
+```
+
+The response contains `placements` with a proposed slot and alternatives, `movesToConfirm`, and `unplaced` activities. Only events explicitly listed as flexible can receive proposed moves. Their duration is preserved. A proposal makes no calendar writes.
+
+To accept a move, send `{"request": <original request>, "move": <first movesToConfirm entry>}` to `POST /scheduling/confirm-move`. The server recalculates the proposal and rejects a stale move with HTTP 409. Refresh the proposal after each move. Save accepted new placements using `POST /events` with the placement title, priority, startTime and endTime. Confirmation and creation each write one event.
+
 ## Events (manual API)
 
 These use the same service and the same ownership rules as the assistant.
@@ -115,8 +131,8 @@ These use the same service and the same ownership rules as the assistant.
 |---|---|---|
 | `GET` | `/events?from=&to=` | Events overlapping the window (ISO UTC). Default: now to +30 days. Max range 366 days. |
 | `GET` | `/events/{id}` | `404` if the event does not exist **or belongs to someone else** (same answer for both). |
-| `POST` | `/events` | `201`. `409` if it overlaps another event unless `?force=true`. |
-| `PUT` | `/events/{id}` | Replaces the editable fields. Same `409`/`force` rule. |
+| `POST` | `/events` | `201`. `409` if it overlaps another event even with `?force=true`. |
+| `PUT` | `/events/{id}` | Replaces the editable fields. Moving into an occupied slot returns `409`. |
 | `DELETE` | `/events/{id}` | `204`. |
 
 Create/replace body (`EventRequestDto`):

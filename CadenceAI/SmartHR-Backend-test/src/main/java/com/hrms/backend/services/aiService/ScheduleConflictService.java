@@ -57,7 +57,11 @@ public class ScheduleConflictService {
      */
     public List<Slot> suggestAlternatives(String userId, ZoneId zone, Instant preferredStart, long durationMinutes,
                                           String excludeEventId, Instant notBefore, int max) {
-        Duration duration = Duration.ofMinutes(durationMinutes);
+        return suggestAlternatives(userId, zone, preferredStart, Duration.ofMinutes(durationMinutes), excludeEventId, notBefore, max);
+    }
+
+    List<Slot> suggestAlternatives(String userId, ZoneId zone, Instant preferredStart, Duration duration,
+                                   String excludeEventId, Instant notBefore, int max) {
         LocalDate day = preferredStart.atZone(zone).toLocalDate();
         List<Slot> all = new ArrayList<>();
         for (int i = 0; i < 2 && all.size() < max; i++) {

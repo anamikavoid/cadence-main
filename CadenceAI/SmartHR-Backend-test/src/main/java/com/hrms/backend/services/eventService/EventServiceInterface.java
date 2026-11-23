@@ -19,6 +19,8 @@ public interface EventServiceInterface {
     /** Replaces the editable fields of an event. Throws ResourceNotFoundException if it is not the user's. */
     Event update(String userId, String eventId, EventRequestDto dto);
 
+    Event confirmMove(String userId, String id, Instant previousStart, Instant previousEnd, Instant start);
+
     /** Deletes an event. Throws ResourceNotFoundException if it is not the user's. */
     void delete(String userId, String eventId);
 

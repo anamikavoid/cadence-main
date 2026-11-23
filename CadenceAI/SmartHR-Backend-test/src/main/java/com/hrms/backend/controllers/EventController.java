@@ -2,11 +2,8 @@ package com.hrms.backend.controllers;
 
 import com.hrms.backend.dtos.entityDtos.Event.EventRequestDto;
 import com.hrms.backend.dtos.entityDtos.Event.EventResponseDto;
-import com.hrms.backend.dtos.response_message.ErrorApiResponseMessage;
 import com.hrms.backend.exceptions.BadApiRequestException;
 import com.hrms.backend.models.Event;
-import com.hrms.backend.services.aiService.ScheduleConflictService;
-import com.hrms.backend.services.eventService.EventServiceImpl;
 import com.hrms.backend.services.eventService.EventServiceInterface;
 import com.hrms.backend.utils.CurrentUser;
 import jakarta.validation.Valid;
@@ -36,8 +33,8 @@ import java.util.List;
  *
  *   GET    /events?from=&to=   events overlapping the window (ISO UTC, default: next 30 days)
  *   GET    /events/{id}
- *   POST   /events[?force=true]   409 if it overlaps another event, unless force=true
- *   PUT    /events/{id}[?force=true]
+ *   POST   /events   409 if it overlaps another event
+ *   PUT    /events/{id}
  *   DELETE /events/{id}
  */
 @RestController
@@ -47,12 +44,10 @@ public class EventController {
     private static final long MAX_RANGE_DAYS = 366;
 
     private final EventServiceInterface eventService;
-    private final ScheduleConflictService conflictService;
 
     @Autowired
-    public EventController(EventServiceInterface eventService, ScheduleConflictService conflictService) {
+    public EventController(EventServiceInterface eventService) {
         this.eventService = eventService;
-        this.conflictService = conflictService;
     }
 
     @GetMapping
@@ -76,26 +71,16 @@ public class EventController {
 
     @PostMapping
     public ResponseEntity<?> create(@Valid @RequestBody EventRequestDto dto,
-                                    @RequestParam(defaultValue = "false") boolean force,
                                     Authentication authentication) {
         String userId = CurrentUser.id(authentication);
-        if (!force) {
-            ResponseEntity<ErrorApiResponseMessage> conflict = conflictResponse(userId, dto, null);
-            if (conflict != null) return conflict;
-        }
         Event created = eventService.create(userId, dto, "MANUAL");
         return ResponseEntity.status(HttpStatus.CREATED).body(EventResponseDto.from(created));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable String id, @Valid @RequestBody EventRequestDto dto,
-                                    @RequestParam(defaultValue = "false") boolean force,
                                     Authentication authentication) {
         String userId = CurrentUser.id(authentication);
-        if (!force) {
-            ResponseEntity<ErrorApiResponseMessage> conflict = conflictResponse(userId, dto, id);
-            if (conflict != null) return conflict;
-        }
         return ResponseEntity.ok(EventResponseDto.from(eventService.update(userId, id, dto)));
     }
 
@@ -106,19 +91,6 @@ public class EventController {
     }
 
     // ------------------------------------------------------------ helpers
-
-    private ResponseEntity<ErrorApiResponseMessage> conflictResponse(String userId, EventRequestDto dto, String excludeId) {
-        Instant start = dto.getStartTime();
-        if (start == null) return null; // validation will reject it
-        Instant end = dto.getEndTime() != null ? dto.getEndTime() : start.plus(Duration.ofMinutes(EventServiceImpl.DEFAULT_DURATION_MINUTES));
-        if (!end.isAfter(start)) return null; // the service will reject it with a clear message
-        List<Event> conflicts = conflictService.findConflicts(userId, start, end, excludeId);
-        if (conflicts.isEmpty()) return null;
-        String message = "This overlaps with \"" + conflicts.get(0).getTitle() + "\""
-                + (conflicts.size() > 1 ? " and " + (conflicts.size() - 1) + " more" : "")
-                + ". Send it again with ?force=true to save it anyway.";
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorApiResponseMessage.builder().error(message).build());
-    }
 
     private static Instant parseInstant(String text, String name) {
         if (text == null || text.isBlank()) return null;
